@@ -24,24 +24,23 @@ model_path = "" # model 没搞清楚是什么
 import mrmr
 cna_data_path = data_prefix.joinpath("raw_CNA_1.csv")
 expr_data_path = data_prefix.joinpath("raw_gene_expression_1.csv")
-patient_data_path =  data_prefix.joinpath("processed_clinical.csv")
-rna_data_path = data_prefix.joinpath("raw_mRNA_1.csv")
+patient_data_path =  data_prefix.joinpath("raw_clinical_1.csv")
 model_name = model_path + "my_model"
 
 ## 2. define PAM50 genes and functions
 
-PAM50_genes = ['FOXC1', 'MIA', 'KNTC2', 'CEP55', 'ANLN',
-                'MELK', 'GPR160', 'TMEM45B',
-                'ESR1', 'FOXA1', 'ERBB2', 'GRB7',
-                'FGFR4', 'BLVRA', 'BAG1', 'CDC20',
-                'CCNE1', 'ACTR3B', 'MYC', 'SFRP1',
-                'KRT17', 'KRT5', 'MLPH', 'CCNB1', 'CDC6',
-                'TYMS', 'UBE2T', 'RRM2', 'MMP11',
-                'CXXC5', 'ORC6L', 'MDM2', 'KIF2C', 'PGR',
-                'MKI67', 'BCL2', 'EGFR', 'PHGDH',
-                'CDH3', 'NAT1', 'SLC39A6',
-                'MAPT', 'UBE2C', 'PTTG1', 'EXO1', 'CENPF',
-                'CDCA1', 'MYBL2', 'BIRC5'] # 
+# PAM50_genes = ['FOXC1', 'MIA', 'KNTC2', 'CEP55', 'ANLN',
+#                'MELK', 'GPR160', 'TMEM45B',
+#                'ESR1', 'FOXA1', 'ERBB2', 'GRB7',
+#                'FGFR4', 'BLVRA', 'BAG1', 'CDC20',
+#                'CCNE1', 'ACTR3B', 'MYC', 'SFRP1',
+#                'KRT17', 'KRT5', 'MLPH', 'CCNB1', 'CDC6',
+#                'TYMS', 'UBE2T', 'RRM2', 'MMP11',
+#                'CXXC5', 'ORC6L', 'MDM2', 'KIF2C', 'PGR',
+#                'MKI67', 'BCL2', 'EGFR', 'PHGDH',
+#                'CDH3', 'NAT1', 'SLC39A6',
+#                'MAPT', 'UBE2C', 'PTTG1', 'EXO1', 'CENPF',
+#                'CDCA1', 'MYBL2', 'BIRC5'] # 
 # Compute entropy for CNA variables
 def entropy(x):
     unique, counts = np.unique(x, return_counts=True)
@@ -67,9 +66,9 @@ def transferLabelFromSurvivalData(data):
     pass
 
 def train_graph(): 
-    ######################## 1.  load data ###############################
-    # Load patient data from file    
-    patient_data = pandas.read_csv(patient_data_path).dropna() # 1980  age [0,100]
+    # Load patient data from file
+    
+    patient_data = pandas.read_csv(patient_data_path)
     survival_months_data = patient_data[['PATIENT_ID', 'OS_MONTHS']].dropna()
      # Load CNA data from file
     cna_data = pandas.read_csv(cna_data_path).dropna()
@@ -77,60 +76,38 @@ def train_graph():
     # Load gene expr data from file
     gene_expr_data = pandas.read_csv(expr_data_path).dropna()
     gene_expr_data = gene_expr_data.drop(['Entrez_Gene_Id'], axis=1)
-    # Load mRNA data from file
-    rna_data = pandas.read_csv(rna_data_path).dropna()
-    rna_data = rna_data.drop(['Entrez_Gene_Id'], axis=1)
-    
-    
-    ###################### 2. 对齐数据集 #####################
-    # Extract common genes, num of common genes is 15709
+    # Extract common genes
     common_genes = set(cna_data['Hugo_Symbol']) & set(gene_expr_data['Hugo_Symbol'])
-    common_genes = common_genes & set(rna_data['Hugo_Symbol']) # try 
+    # common_with_PAM50 = common_genes & set(PAM50_genes)
     common_genes = pandas.Series(list(common_genes)).dropna() # previous selection
-    cna_data = cna_data.loc[cna_data['Hugo_Symbol'].isin(common_genes)] 
+    cna_data = cna_data.loc[cna_data['Hugo_Symbol'].isin(common_genes)]
     gene_expr_data = gene_expr_data.loc[gene_expr_data['Hugo_Symbol'].isin(common_genes)]
-    rna_data =rna_data.loc[rna_data['Hugo_Symbol'].isin(common_genes)]
-    # Extract common patients, num of common column is 1905
+    # Extract common patients
     common_cols = cna_data.columns.intersection(gene_expr_data.columns)
-    common_cols = common_cols.intersection(rna_data.columns)
-    cna_data = cna_data[common_cols]  # till now , (15709,1905)
-    gene_expr_data= gene_expr_data[common_cols] # same with cna_data
-    rna_data = cna_data[common_cols] # same with the other (15709,1905)
-        
-    
+    cna_data = cna_data[common_cols]
+    gene_expr_data= gene_expr_data[common_cols]
+
     # Sort by gene
     cna_data = cna_data.sort_values(by='Hugo_Symbol')
     gene_expr_data = gene_expr_data.sort_values(by='Hugo_Symbol')
-    rna_data = rna_data.sort_values(by='Hugo_Symbol')
+
     ## star: the Median Absolute Deviation (MAD) score, across all patients was computed for every gene
     
     # Extract most high-varied genes
     np_gene_data = gene_expr_data.iloc[:, 1:].values
-    np_rna_data = rna_data.iloc[:, 1:].values
-    # first fun: use MAD computing 
-    top_MAD_expr = np.argsort(np.apply_along_axis(func1d=MAD, axis = 1, arr=np_gene_data))[-1200:]
-
-    top_MAD_rna = np.argsort(np.apply_along_axis(func1d= MAD, axis = 1, arr = np_rna_data))[-1200:]
-
-    select_expr_genes = gene_expr_data.iloc[top_MAD_expr, 0]
-    select_rna_genes = rna_data.iloc[top_MAD_rna, 0]
-    common_top_MAD_genes = list(set(select_expr_genes) | set(select_rna_genes)) # 788 -> 2294
+    # 
+    top_MAD_cna = np.argsort(np.apply_along_axis(func1d=MAD, axis=1, arr=np_gene_data))[-1200:]
     
     # Obtain list of genes to extract
-   # selected_genes = cna_data.iloc[top_MAD_cna, 0] # get one column,num of selected genes is 1200 
-    #selected_genes = list(set(selected_genes) | set(common_with_PAM50)) 
-    series_common_MAD_genes = pandas.Series(list(common_top_MAD_genes)).dropna()
+    selected_genes = cna_data.iloc[top_MAD_cna, 0] # get one column 
+    selected_genes = list(set(selected_genes) | common_genes)
+    selected_genes = pandas.Series(list(selected_genes)).dropna()
     ## and update gene_expr_data and cna_data
-    gene_expr_data = gene_expr_data.loc[gene_expr_data['Hugo_Symbol'].isin(select_expr_genes)]
-    rna_data = rna_data.loc[rna_data['Hugo_Symbol'].isin(select_rna_genes)]
-    cna_data = cna_data.loc[cna_data['Hugo_Symbol'].isin(series_common_MAD_genes)]
-    
-    
-    
-    
+    gene_expr_data = gene_expr_data.loc[gene_expr_data['Hugo_Symbol'].isin(selected_genes)]
+    cna_data = cna_data.loc[cna_data['Hugo_Symbol'].isin(selected_genes)]
     # extract most entropy gene for top 300 gene
     np_gene_data = cna_data.iloc[:, 1:].values
-    top_MAD_cna = np.argsort(np.apply_along_axis(func1d=entropy, axis=1, arr=np_gene_data))[-600:]
+    top_MAD_cna = np.argsort(np.apply_along_axis(func1d=entropy, axis=1, arr=np_gene_data))[-300:]
     ## update cna_data
     selected_genes = cna_data.iloc[top_MAD_cna, 0]
     cna_data = cna_data.loc[cna_data['Hugo_Symbol'].isin(selected_genes)]
@@ -142,72 +119,49 @@ def train_graph():
     print(cna_data)
     cna_data = pandas.get_dummies(cna_data, columns=cna_data.columns)
     cna_data = cna_data.transpose()
-    print(cna_data)
     
     # Remove gene column from RNA, named gene_expr_data
     gene_expr_data = gene_expr_data.iloc[:, 1:]
-    rna_data  = rna_data.iloc[:, 1:]
     # Get number of features
     n_cna_features = cna_data.shape[0]
     n_gene_expr_features = gene_expr_data.shape[0]
-    n_rna_features = rna_data.shape[0]
-    print("CNA features: ", n_cna_features)# 900, one- hot encoding 
-    print("gene expr features: ", n_gene_expr_features)# 15709 -> 1216
-    print("RNA features: ", n_rna_features)
+    print("CNA features: ", n_cna_features)# 900
+    print("RNA features: ", n_gene_expr_features)# 15709
     
     # uptil 129 ,we have 28 row codes
     
     np_type_data = []
     np_gene_expr_data = []
     np_cna_data = []
-    np_rna_data = []
     
-    survival_id =  survival_months_data['OS_MONTHS']
-    median_survival = median(survival_id)
-    #################### 
     for index, row in survival_months_data.iterrows():
 
         patient_id = row['PATIENT_ID']
         survival_id = row['OS_MONTHS']
         
-        if survival_id > 60 and survival_id < median_survival: #  survival months more than 60 ,label as long terminal
+        if survival_id > 60 : #  survival months more than 60 ,label as long terminal
             survival_id = 1
-        elif survival_id  > median_survival :       
-            survival_id = 2
-        else :
+        else:       
             survival_id = 0
         if patient_id in gene_expr_data: 
             #  I don't have to limit num of each survival_id
             gene_expr_sample = gene_expr_data[patient_id].values.transpose()
             cna_sample = cna_data[patient_id].values.transpose()
-            rna_sample = rna_data [patient_id].values.transpose()
             np_gene_expr_data.append(gene_expr_sample)
             np_cna_data.append(cna_sample)
-            np_rna_data.append(rna_sample)
             np_type_data.append(survival_id)
             
     np_gene_expr_data = np.array(np_gene_expr_data) # negative numbers
     np_cna_data = np.array(np_cna_data)
-    np_rna_data = np.array(np_rna_data)
     np_type_data = np.array(np_type_data)
     
-    # Normalize gene expr data and rna data, numberic
+    # Normalize gene expr data
     np_gene_expr_data = 2 * (np_gene_expr_data - np.min(np_gene_expr_data)) / (np.max(np_gene_expr_data) - np.min(np_gene_expr_data)) - 1
-    np_rna_data = 2 * (np_rna_data - np.min(np_rna_data)) / (np.max(np_rna_data) - np.min(np_rna_data)) - 1
-    ##  astype() 
-    #np_gene_expr_data = np_gene_expr_data.astype(int)
-    #np_rna_data = 
-    #np_cna_data
+
     # Print cluster counts
     unique, counts = np.unique(np_type_data, return_counts=True)
-    print(unique) # 0, 1, 2
-    print(counts) # [473 487 944]
-
-        
-    ####################### 保存成 csv 文件,这里的使用的方法是过滤法 #############
-    # np.savetxt("reduction_rna.csv", np_rna_data, delimiter = ',')
-    # np.savetxt("reduction_gene_expr.csv", np_gene_expr_data, delimiter = ',')   
-    # np.savetxt("reduction_cna.csv", np_cna_data, delimiter = ',')  
+    print(counts)
+    
     # Split into training and test data
     n_samples = np_gene_expr_data.shape[0]
     n_train_samples = int(n_samples * 0.8)
@@ -218,76 +172,14 @@ def train_graph():
     
     X_train_gene_expr = np_gene_expr_data[train_indices, :].copy()
     X_train_cna = np_cna_data[train_indices, :].copy()
-    X_train_rna = np_rna_data[train_indices, :].copy()
     y_train = np_type_data[train_indices].copy()
 
     X_test_gene_expr = np_gene_expr_data[test_indices, :].copy()
     X_test_cna = np_cna_data[test_indices, :].copy()
-    X_test_rna = np_rna_data[test_indices, :].copy()
     y_test = np_type_data[test_indices].copy()
+    
+train_graph()
 
-    from sklearn.model_selection import train_test_split,cross_val_score,cross_val_predict,KFold
-    from sklearn.preprocessing import StandardScaler
-    from sklearn.pipeline import Pipeline 
-    from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
-    from sklearn.linear_model import LogisticRegression
-    from sklearn.metrics import classification_report,confusion_matrix
-    from sklearn.model_selection import GridSearchCV
-    from sklearn.decomposition import PCA
-    from sklearn.ensemble import RandomForestClassifier,AdaBoostClassifier, GradientBoostingClassifier, ExtraTreesClassifier # 在pca上 结果不是很好
-    from sklearn.manifold import  TSNE, LocallyLinearEmbedding
-    from sklearn.feature_selection import SelectFromModel    
-    from sklearn.model_selection import GridSearchCV
-    # X = rna_t.iloc[1:,1:].values
-    # y = rna_t.iloc[1:,0].values
-    # sc = StandardScaler()
-    # sc.fit(X)
-    
-   
-    # X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.33, random_state=444)
-    
-    # sel = SelectFromModel(ExtraTreesClassifier(n_estimators=10, random_state=444), threshold='mean')
-    # clf = RandomForestClassifier(n_estimators= 500, random_state=444)
-    # model = Pipeline([('sel', sel), ('clf', clf)])
-    # params = {'clf__max_features': ['auto', 'sqrt', 'log2']}
-    # gs = GridSearchCV(model,params)
-    # gs.fit(X_train_gene_expr,y_train)
-    
-    # gs.score(X_train_gene_expr, y_test)
-    # print("Classification Report : \n",classification_report(predict,y)) 
-    ######################## GTB ; gene 0.4619; cna: 0.456 rna :0.4514 #####################
-    #########################GTB ; CNA 0.454 RNA 0.464 gene: 0.491 #########################
-    classifier = GradientBoostingClassifier(n_estimators= 100, max_features='log2', random_state=0).fit(X_train_cna, y_train)
-    y_pred = classifier.predict(X_test_cna) 
-    accuracy_score(y_test, y_pred) # 
-    print(classification_report(y_test, y_pred))
-    
-    classifier = GradientBoostingClassifier(n_estimators= 100, max_features='log2', random_state=0).fit(X_train_rna, y_train)
-    y_pred = classifier.predict(X_test_rna) 
-    accuracy_score(y_test, y_pred) # 
-    print(classification_report(y_test, y_pred))
-    
-    classifier = GradientBoostingClassifier(n_estimators= 100, max_features='log2', random_state=0).fit(X_train_gene_expr, y_train)
-    y_pred = classifier.predict(X_test_gene_expr) 
-    accuracy_score(y_test, y_pred) # 
-    print(classification_report(y_test, y_pred))
-
-    ################### ADABOOST :gene: 0.425  cna : 0.467 rna : 0.417 #############################
-    #################### cna : 0.48 gene:  0.438(200) rna 0.435 #####################################
-    classifier = AdaBoostClassifier(n_estimators=100, random_state=0).fit(X_train_cna, y_train)
-    y_pred = classifier.predict(X_test_cna)
-    accuracy_score(y_test, y_pred) # 
-    print(classification_report(y_test, y_pred))
-    
-    classifier = AdaBoostClassifier(n_estimators=200, random_state=0).fit(X_train_gene_expr, y_train)
-    y_pred = classifier.predict(X_test_gene_expr)
-    accuracy_score(y_test, y_pred) # 
-    print(classification_report(y_test, y_pred))
-    
-    classifier = AdaBoostClassifier(n_estimators=100, random_state=0).fit(X_train_rna, y_train)
-    y_pred = classifier.predict(X_test_rna)
-    accuracy_score(y_test, y_pred) # 
-    print(classification_report(y_test, y_pred))
                     
 
 
